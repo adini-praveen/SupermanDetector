@@ -54,7 +54,7 @@ type currentGeo struct {
 // json object representing the preceeding or succeeding IP
 type ipResponse struct {
 	Ip			string		`json:"ip,omitempty"'`
-	Speed		*float32		`json:"speed,omitempty"`
+	Speed		*float32	`json:"speed,omitempty"`
 	Lat			float64		`json:"lat,omitempty"`
 	Lon			float64		`json:"lon,omitempty"`
 	Radius		uint16		`json:"radius,omitempty"`
@@ -86,7 +86,7 @@ func homePage(writer http.ResponseWriter, req *http.Request){
 	err := decoder.Decode(&input)
 	if err != nil {
 		respondWithError(err.Error(), writer)
-		fmt.Println("handling %q: %v", req.RequestURI, err)
+		fmt.Println("handling ", req.RequestURI, ": ", err)
 		return
 	}
 
@@ -155,15 +155,18 @@ func homePage(writer http.ResponseWriter, req *http.Request){
 		var preceedingHaversineCoord haversine.Coord
 		var succeedingHaversineCoord haversine.Coord
 
-		current.Lat, current.Lon, current.Radius = getLatitudeAndLongitude(input.IP_Address)
+		current.Lat, current.Lon, current.Radius = GetLatitudeAndLongitude(input.IP_Address)
 		if current.Lat != -10000 {
 			resp.CurrentGeo = current
 			currHaversineCoord = haversine.Coord{Lat:current.Lat, Lon:current.Lon}
+		} else {
+			respondWithError(fmt.Sprintf("Error retreiving geo location for ip %s", input.IP_Address), writer)
+			return
 		}
 
 		// if t1.uuid is not null
 		if t1.uuid.Valid {
-			preceeding.Lat, preceeding.Lon, preceeding.Radius = getLatitudeAndLongitude(t1.ipaddress.String)
+			preceeding.Lat, preceeding.Lon, preceeding.Radius = GetLatitudeAndLongitude(t1.ipaddress.String)
 			if preceeding.Lat != -10000 {
 				// creating a bool and speed object so that the json keys can map to these objects so that they are not ignored
 				// when displaying 0 or nil values because of omitempty flag set on the key
@@ -175,23 +178,30 @@ func homePage(writer http.ResponseWriter, req *http.Request){
 				preceedingHaversineCoord = haversine.Coord{Lat: preceeding.Lat, Lon: preceeding.Lon}
 				dist, _ := haversine.Distance(currHaversineCoord, preceedingHaversineCoord)
 				tmDiff := tm.Sub(time.Unix(tm1, 0)).Hours()
+
+
+				// Setting the suspicion flag to true if the speed it takes to travel from preceeding location to the current location is less than 500
 				if tmDiff == 0 {
 					tmDiff = 1
 				}
 				*speed = float32(dist / tmDiff)
 				preceeding.Speed = speed
 
-				if *speed > 500 {
+				if *speed <= 500 {
 					*tr = true
 				}
+
 				resp.TravelToCurrentGeoSuspicious = tr
 				resp.PrecedingIpAccess = preceeding
+			} else {
+				respondWithError(fmt.Sprintf("Error retreiving geo location for preceeding ip %s", t1.ipaddress.String), writer)
+				return
 			}
 		}
 
 		// if t2.uuid is not null
 		if t2.uuid.Valid {
-			succeeding.Lat, succeeding.Lon, succeeding.Radius = getLatitudeAndLongitude(t2.ipaddress.String)
+			succeeding.Lat, succeeding.Lon, succeeding.Radius = GetLatitudeAndLongitude(t2.ipaddress.String)
 			if succeeding.Lat != -10000 {
 				tr := new(bool)
 				speed := new(float32)
@@ -201,16 +211,21 @@ func homePage(writer http.ResponseWriter, req *http.Request){
 				succeedingHaversineCoord = haversine.Coord{Lat: succeeding.Lat, Lon: succeeding.Lon}
 				dist, _ := haversine.Distance(currHaversineCoord, succeedingHaversineCoord)
 				tmDiff := time.Unix(tm1, 0).Sub(tm).Hours()
+
+				// Setting the suspicion flag to true if the speed it takes to travel from current location to subsequent location is less than 500
 				if tmDiff == 0 {
 					tmDiff = 1
 				}
 				*speed = float32(dist / tmDiff)
 				succeeding.Speed = speed
-				if *speed > 500 {
+				if *speed <= 500 {
 					*tr = true
 				}
 				resp.TravelFromCurrentGeoSuspicious = tr
 				resp.SubsequentIpAccess = succeeding
+			} else {
+				respondWithError(fmt.Sprintf("Error retreiving geo location for subsequent ip %s", t1.ipaddress.String), writer)
+				return
 			}
 		}
 
@@ -233,7 +248,7 @@ func homePage(writer http.ResponseWriter, req *http.Request){
 }
 
 // this function return latitude, longitude and radius give an IPAddress. If it couldnt find the ip it returns dummy value of -10000
-func getLatitudeAndLongitude(ip string) (lat, lon float64, radius uint16) {
+func GetLatitudeAndLongitude(ip string) (lat, lon float64, radius uint16) {
 	geoIpdb, err := geoip2.Open("databases/GeoLite2-City.mmdb")
 	if err != nil {
 		log.Fatal(err)
@@ -244,7 +259,7 @@ func getLatitudeAndLongitude(ip string) (lat, lon float64, radius uint16) {
 	record, err := geoIpdb.City(ipAddress)
 	if err != nil {
 		log.Fatal(err)
-		return -10000, -10000, 10000
+		return -10000, -10000, 65535
 	}
 	lat = record.Location.Latitude
 	lon = record.Location.Longitude

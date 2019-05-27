@@ -12,19 +12,12 @@ ADD main.go $GOPATH/src/SupermanDetector/
 
 COPY vendor/ $GOPATH/src/SupermanDetector/vendor/
 
-RUN ls $GOPATH/src/SupermanDetector/vendor
-
 WORKDIR $GOPATH/src/SupermanDetector/
 
 RUN CGO_ENABLED=1 GOOS=linux go build -a -installsuffix cgo -o SupermanDetector $GOPATH/src/SupermanDetector/main.go
 
-
 FROM golang:alpine
 
 COPY --from=first_stage $GOPATH/src/SupermanDetector/SupermanDetector .
-
-#COPY databases/ ./databases/
-
-RUN ls
 
 ENTRYPOINT ["./SupermanDetector"]
