@@ -25,7 +25,7 @@ github.com/mattn/go-sqlite3 - sqlite3 client to connect to sqlite database
 
 ```
 
-### Compiling and Execution
+### Building and Execution
 
 The project is built in a golang docker container as a multistage build. The artifact from the first stage is copied into the next image and used as an entrypoint. The enclosed build.sh will compile and runs the docker container exposing the endpoint API on http://localhost:10000
 
