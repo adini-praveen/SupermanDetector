@@ -36,6 +36,10 @@ func (ns *NullString) Scan(value interface{}) error {
 	return nil
 }
 
+type Env struct {
+	sqlDb *sql.DB
+}
+
 // json object to map the endpoint input data
 type RequestInput struct {
 	Event_UUID		string		`json:"event_uuid"`
@@ -75,11 +79,11 @@ type Response struct {
 	SubsequentIpAccess				ipResponse	`json:"subsequentIpAccess,omitempty"`
 }
 
-var sqlDb *sql.DB
+//var sqlDb *sql.DB
 var tm *time.Time
 var currHaversineCoord haversine.Coord
 
-func homePage(writer http.ResponseWriter, req *http.Request){
+func (env *Env) home(writer http.ResponseWriter, req *http.Request){
 	decoder := json.NewDecoder(req.Body)
 	var input RequestInput
 	writer.Header().Set("Content-Type", "application/json")
@@ -105,13 +109,6 @@ func homePage(writer http.ResponseWriter, req *http.Request){
 		return
 	}
 
-	// Opens a db connection to login.db that keeps track of all the incoming requests
-	sqlDb, sqlErr := sql.Open("sqlite3", "databases/login.db")
-	if sqlErr != nil {
-		log.Fatal(sqlErr)
-	}
-	defer sqlDb.Close()
-
 	// building a temp table that appends row_number column which is used in join condition
 	selectStatement := fmt.Sprintf(`with new_table
 		AS (select uuid, username, ipaddress, date_time,ROW_NUMBER() OVER (order by date_time) row_no FROM request where username="%s")
@@ -119,15 +116,17 @@ func homePage(writer http.ResponseWriter, req *http.Request){
 			LEFT JOIN (select * from new_table) as t1 ON t1.row_no = t.row_no-1
 				LEFT JOIN (select * from new_table) as t2 ON t2.row_no = t.row_no+1;`, input.Username, strconv.FormatInt(input.Unix_timestamp, 10), input.IP_Address)
 
-	tx, err := sqlDb.Begin()
+	tx, err := env.sqlDb.Begin()
 	if err != nil {
 		log.Fatal(err)
+		panic(err)
 	}
 
 	// insert the request data into the database
-	_, err = sqlDb.Exec("insert into request(uuid, username, ipaddress, date_time) values(?, ?, ?, ?)", input.Event_UUID, input.Username, input.IP_Address, input.Unix_timestamp)
+	_, err = env.sqlDb.Exec("insert into request(uuid, username, ipaddress, date_time) values(?, ?, ?, ?)", input.Event_UUID, input.Username, input.IP_Address, input.Unix_timestamp)
 	if err != nil {
 		log.Fatal(err)
+		panic(err)
 	}
 	tx.Commit()
 
@@ -142,7 +141,7 @@ func homePage(writer http.ResponseWriter, req *http.Request){
 	// variables to hold the current, preceeding and succeeding database records
 	var t, t1, t2 sqlrow
 
-	row := sqlDb.QueryRow(selectStatement)
+	row := env.sqlDb.QueryRow(selectStatement)
 	switch err := row.Scan(&t.uuid, &t.username, &t.ipaddress, &t.date_time, &t1.uuid, &t1.username, &t1.ipaddress, &t1.date_time, &t2.uuid, &t2.username, &t2.ipaddress, &t2.date_time); err {
 	case sql.ErrNoRows:
 		fmt.Println("No rows were returned!")
@@ -177,21 +176,32 @@ func homePage(writer http.ResponseWriter, req *http.Request){
 				preceeding.Ip = t1.ipaddress.String
 				preceedingHaversineCoord = haversine.Coord{Lat: preceeding.Lat, Lon: preceeding.Lon}
 				dist, _ := haversine.Distance(currHaversineCoord, preceedingHaversineCoord)
-				tmDiff := tm.Sub(time.Unix(tm1, 0)).Hours()
 
+				// Deducting the accuracy radius for both the locations from the previous haversine distance, considering the
+				// location can be anywhere within the radius. In this case i'm assuming its on the circle. Before deducting
+				// convert radius in kilometers to miles by multiplying with conversion factor 0.6214
+				finalDist := dist - (float64(preceeding.Radius) + float64(current.Radius)) * 0.6214
+				if finalDist < 0 {
+					finalDist = 0
+					resp.TravelToCurrentGeoSuspicious = tr
+				} else {
 
-				// Setting the suspicion flag to true if the speed it takes to travel from preceeding location to the current location is less than 500
-				if tmDiff == 0 {
-					tmDiff = 1
+					tmDiff := tm.Sub(time.Unix(tm1, 0)).Hours()
+					// if hour is less than 0 assume hour = 1
+					if tmDiff == 0 {
+						tmDiff = 1
+					}
+
+					// Setting the suspicion flag to true if the speed to travel from preceeding location to the current location is greater than 500
+					*speed = float32(dist / tmDiff)
+
+					if *speed > 500 {
+						*tr = true
+					}
+
+					resp.TravelToCurrentGeoSuspicious = tr
 				}
-				*speed = float32(dist / tmDiff)
 				preceeding.Speed = speed
-
-				if *speed <= 500 {
-					*tr = true
-				}
-
-				resp.TravelToCurrentGeoSuspicious = tr
 				resp.PrecedingIpAccess = preceeding
 			} else {
 				respondWithError(fmt.Sprintf("Error retreiving geo location for preceeding ip %s", t1.ipaddress.String), writer)
@@ -210,18 +220,28 @@ func homePage(writer http.ResponseWriter, req *http.Request){
 				succeeding.Ip = t2.ipaddress.String
 				succeedingHaversineCoord = haversine.Coord{Lat: succeeding.Lat, Lon: succeeding.Lon}
 				dist, _ := haversine.Distance(currHaversineCoord, succeedingHaversineCoord)
-				tmDiff := time.Unix(tm1, 0).Sub(tm).Hours()
+				// Deducting the accuracy radius for both the locations from the previous haversine distance, considering the
+				// location can be anywhere within the radius. In this case i'm assuming its on the circle. Before deducting
+				// convert radius in kilometers to miles by multiplying with conversion factor 0.6214
+				finalDist := dist - (float64(succeeding.Radius) + float64(current.Radius)) * 0.6214
+				if finalDist < 0 {
+					finalDist = 0
+					resp.TravelFromCurrentGeoSuspicious = tr
+				} else {
+					tmDiff := time.Unix(tm1, 0).Sub(tm).Hours()
+					// if hour is less than 0 assume hour = 1
+					if tmDiff == 0 {
+						tmDiff = 1
+					}
 
-				// Setting the suspicion flag to true if the speed it takes to travel from current location to subsequent location is less than 500
-				if tmDiff == 0 {
-					tmDiff = 1
+					// Setting the suspicion flag to true if the speed to travel from current location to subsequent location is greater than 500
+					*speed = float32(finalDist / tmDiff)
+					if *speed > 500 {
+						*tr = true
+					}
+					resp.TravelFromCurrentGeoSuspicious = tr
 				}
-				*speed = float32(dist / tmDiff)
 				succeeding.Speed = speed
-				if *speed <= 500 {
-					*tr = true
-				}
-				resp.TravelFromCurrentGeoSuspicious = tr
 				resp.SubsequentIpAccess = succeeding
 			} else {
 				respondWithError(fmt.Sprintf("Error retreiving geo location for subsequent ip %s", t1.ipaddress.String), writer)
@@ -277,10 +297,19 @@ func respondWithError(str string, writer http.ResponseWriter) {
 
 
 func handleRequests() {
-	http.HandleFunc("/", homePage)
+	// Opens a db connection to login.db that keeps track of all the incoming requests
+	sqlDb, sqlErr := sql.Open("sqlite3", "databases/login.db")
+	if sqlErr != nil {
+		log.Fatal(sqlErr)
+		panic(sqlErr)
+	}
+	env := &Env{sqlDb: sqlDb}
+	defer env.sqlDb.Close()
+	http.HandleFunc("/", env.home)
 	log.Fatal(http.ListenAndServe(":10000", nil))
 }
 
 func main() {
+	//defer sqlDb.Close()
 	handleRequests()
 }

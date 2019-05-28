@@ -167,8 +167,11 @@ func TestTwoRequest(t *testing.T) {
 	fmt.Printf("Response object: %+v\n", resp)
 	fmt.Printf("Preceeding Request: %+v\n", resp.PrecedingIpAccess)
 	fmt.Printf("Subsequent Request: %+v\n", resp.SubsequentIpAccess)
-	if isEmpty(resp.PrecedingIpAccess) || !isEmpty(resp.SubsequentIpAccess) ||
-		resp.TravelToCurrentGeoSuspicious == nil || resp.TravelFromCurrentGeoSuspicious != nil {
+	if isEmpty(resp.PrecedingIpAccess) ||
+		!isEmpty(resp.SubsequentIpAccess) ||
+		resp.TravelToCurrentGeoSuspicious == nil ||
+		resp.TravelFromCurrentGeoSuspicious != nil  ||
+		*(resp.TravelToCurrentGeoSuspicious) {
 		t.Errorf("The preceeding response must not be empty and subsequent response must be empty")
 	}
 }
@@ -182,7 +185,7 @@ func TestThreeRequest(t *testing.T) {
 	var eventId = randomAlphanumeric(8) + "-" + randomAlphanumeric(4) + "-" + randomAlphanumeric(4) + "-" + randomAlphanumeric(4) + "-" + randomAlphanumeric(12)
 	data.Event_UUID = eventId
 	data.Username = randomAlphanumeric(10)
-	data.IP_Address = "9.11.255.223"
+	data.IP_Address = "9.11.255.223" // USA
 	data.Unix_timestamp = 1514730000
 
 	fmt.Printf("Event ID: %s\n", data.Event_UUID)
@@ -201,7 +204,7 @@ func TestThreeRequest(t *testing.T) {
 	var eventId1 = randomAlphanumeric(8) + "-" + randomAlphanumeric(4) + "-" + randomAlphanumeric(4) + "-" + randomAlphanumeric(4) + "-" + randomAlphanumeric(12)
 	data1.Event_UUID = eventId1
 	data1.Username = data.Username
-	data1.IP_Address = "9.11.255.200"
+	data1.IP_Address = "9.11.255.200" // USA
 	data1.Unix_timestamp = 1514764800
 	fmt.Printf("Event ID1: %s\n", data1.Event_UUID)
 	fmt.Printf("Username1: %s\n", data1.Username)
@@ -219,7 +222,7 @@ func TestThreeRequest(t *testing.T) {
 	var eventId2 = randomAlphanumeric(8) + "-" + randomAlphanumeric(4) + "-" + randomAlphanumeric(4) + "-" + randomAlphanumeric(4) + "-" + randomAlphanumeric(12)
 	data2.Event_UUID = eventId2
 	data2.Username = data.Username
-	data2.IP_Address = "41.72.223.250"
+	data2.IP_Address = "41.72.223.250" // Bhutan
 	data2.Unix_timestamp = 1514743800
 	fmt.Printf("Event ID1: %s\n", data2.Event_UUID)
 	fmt.Printf("Username1: %s\n", data2.Username)
@@ -246,8 +249,22 @@ func TestThreeRequest(t *testing.T) {
 	fmt.Printf("Response object: %+v\n", resp)
 	fmt.Printf("Preceeding Request: %+v\n", resp.PrecedingIpAccess)
 	fmt.Printf("Subsequent Request: %+v\n", resp.SubsequentIpAccess)
-	if isEmpty(resp.PrecedingIpAccess) || isEmpty(resp.SubsequentIpAccess) ||
-		resp.TravelToCurrentGeoSuspicious == nil || resp.TravelFromCurrentGeoSuspicious == nil {
+	if *(resp.TravelFromCurrentGeoSuspicious) {
+		fmt.Println("TravelFromCurrentGeoSuspicious: True")
+	} else {
+		fmt.Println("TravelFromCurrentGeoSuspicious: False")
+	}
+	if *(resp.TravelToCurrentGeoSuspicious) {
+		fmt.Println("TravelToCurrentGeoSuspicious: True")
+	} else {
+		fmt.Println("TravelToCurrentGeoSuspicious: False")
+	}
+	if isEmpty(resp.PrecedingIpAccess) ||
+		isEmpty(resp.SubsequentIpAccess) ||
+		resp.TravelToCurrentGeoSuspicious == nil ||
+		resp.TravelFromCurrentGeoSuspicious == nil ||
+		!*(resp.TravelFromCurrentGeoSuspicious) ||
+		!*(resp.TravelToCurrentGeoSuspicious) {
 		t.Errorf("The preceeding and subsequent response cannot be empty")
 	}
 }
